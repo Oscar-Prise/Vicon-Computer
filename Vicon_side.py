@@ -65,8 +65,8 @@ try:
             )
 
             params = {
-                'leftVel': '0', 'leftAccel': '0.5', 'leftDecel': '0.5',
-                'rightVel': '0', 'rightAccel': '0.5', 'rightDecel': '0.5'
+                'leftVel': '1.2', 'leftAccel': '0.5', 'leftDecel': '0.5',
+                'rightVel': '1.2', 'rightAccel': '0.5', 'rightDecel': '0.5'
             }
             remote.run_treadmill(
                 params['leftVel'], params['leftAccel'], params['leftDecel'],
@@ -113,28 +113,32 @@ try:
                         if componentName == "Cy":
                             values, occluded = client.GetDeviceOutputValues(deviceName, outputName, componentName)
                             if deviceName == "Right":
-                                copR = np.abs(values[0])
+                                # copR = np.abs(values[0])
+                                copR = values[0]
                             elif deviceName == "Left":
-                                copL = np.abs(values[0])
+                                # copL = np.abs(values[0])
+                                copL = values[0]
 
                 Flz, Frz, Flznorm, Frznorm = 0, 0, 0, 0
                 forceplates = client.GetForcePlates()
                 for plate in forceplates:
                     globalForceVectorData = client.GetGlobalForceVector(plate)
                     if plate == 1:
-                        Frz = abs(globalForceVectorData[0][2])
-                        Frznorm = Frz / (bw * 10)
+                        # Frz = abs(globalForceVectorData[0][2])
+                        Frz = globalForceVectorData[0][2]
+                        # Frznorm = Frz / (bw * 10)
                     if plate == 2:
-                        Flz = abs(globalForceVectorData[0][2])
-                        Flznorm = Flz / (bw * 10)
+                        # Flz = abs(globalForceVectorData[0][2])
+                        Flz = globalForceVectorData[0][2]
+                        # Flznorm = Flz / (bw * 10)
 
                 try:
                     treadmill_data = {
                         "vicon_timestamp": time.time(),
                         "copR": copR,
                         "copL": copL,
-                        "Frznorm": Frznorm,
-                        "Flznorm": Flznorm,
+                        "Frz": Frz,
+                        "Flz": Flz,
                     }
                     treadmill_data_str = json.dumps(treadmill_data)
                     Jetson.send_data(treadmill_data_str)
