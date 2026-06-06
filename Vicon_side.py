@@ -89,23 +89,24 @@ try:
             segmenter.reset()
             timer_flag = 0
             while running:
-                if segmenter.both_ready():
-                    if timer_flag == 0:
-                        start_time_trial = time.time()
-                        timer_flag = 1
-                    elapsed_time_trial = time.time() - start_time_trial
-                    if elapsed_time_trial >= TRIAL_DURATION_S:
-                        print(f"Stopping trial after {TRIAL_DURATION_S} seconds")
-                        running = False
-                        break
+                if timer_flag == 0:
+                    start_time_trial = time.time()
+                    timer_flag = 1
+                elapsed_time_trial = time.time() - start_time_trial
+                if elapsed_time_trial >= TRIAL_DURATION_S:
+                    print(f"Stopping trial after {TRIAL_DURATION_S} seconds")
+                    running = False
+                    break
 
                 signals = read_frame_signals(client)
                 timestamp = time.time()
                 segmenter.update_side(segmenter.right, signals.cop_r, signals.frz, timestamp)
                 segmenter.update_side(segmenter.left, signals.cop_l, signals.flz, timestamp)
 
-                if segmenter.right.heel_strike:
-                    print("********")
+                # if segmenter.right.heel_strike:
+                #     print("********RHS**************")
+                if segmenter.left.heel_strike:
+                    print("********LHS**************\n\n")
 
                 try:
                     treadmill_data = {
@@ -120,7 +121,7 @@ try:
                         treadmill_data["percent_gcL"] = segmenter.left.percent_gc
                     treadmill_data_str = json.dumps(treadmill_data)
                     Jetson.send_data(treadmill_data_str)
-                    print(f"[DATA SENT] {treadmill_data_str}")
+                    # print(f"[DATA SENT] {treadmill_data_str}")
                 except Exception as e:
                     print(f"[ERROR] Failed to send data: {e}")
                     break
