@@ -3,19 +3,20 @@ from Header_NexusControl import CaptureNotifier
 from Header_BertecControl import RemoteControl
 from Header_JetsonControlDatastream_pertFull import StreamJetson
 import argparse
-import sys
-import numpy as np
 import random
 import time
 import json
 import threading
 
+from utils_gait_seg import GaitSegmenter
+from utils_rdVicon import connect_vicon, read_frame_signals
+
+START_DELAY_S = 10
+TRIAL_DURATION_S = 30
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('host', nargs='?', help="Host name, in the format of server:port", default="localhost:801")
 args = parser.parse_args()
-
-client = ViconDataStream.Client()
 
 
 def send_start_logging_signal(client_socket):
@@ -25,9 +26,7 @@ def send_start_logging_signal(client_socket):
 
 
 try:
-    client.Connect(args.host)
-    client.SetBufferSize(1)
-    client.EnableDeviceData()
+    client = connect_vicon(args.host)
 
     def main():
         while True:
@@ -64,6 +63,12 @@ try:
                 database_path=trial_path, delay_ms=0, packet_id=rand_id, port=port_number
             )
 
+            print(f"\nTrial ready. Starting treadmill and data collection in {START_DELAY_S} seconds...")
+            for remaining in range(START_DELAY_S, 0, -1):
+                print(f"  {remaining}...")
+                time.sleep(1)
+            print("Starting trial now.\n")
+
             params = {
                 'leftVel': '1.2', 'leftAccel': '0.5', 'leftDecel': '0.5',
                 'rightVel': '1.2', 'rightAccel': '0.5', 'rightDecel': '0.5'
@@ -80,66 +85,39 @@ try:
             else:
                 print("[ERROR] No Jetson client socket available for start logging signal")
 
+            segmenter = GaitSegmenter()
+            segmenter.reset()
             timer_flag = 0
             while running:
-                if timer_flag == 0:
-                    start_time_trial = time.time()
-                    timer_flag = 1
-                elapsed_time_trial = time.time() - start_time_trial
-                if elapsed_time_trial >= 30:
-                    print("Stopping trial after 30 seconds")
-                    running = False
-                    break
+                if segmenter.both_ready():
+                    if timer_flag == 0:
+                        start_time_trial = time.time()
+                        timer_flag = 1
+                    elapsed_time_trial = time.time() - start_time_trial
+                    if elapsed_time_trial >= TRIAL_DURATION_S:
+                        print(f"Stopping trial after {TRIAL_DURATION_S} seconds")
+                        running = False
+                        break
 
-                HasFrame = False
-                timeout = 50
-                while not HasFrame:
-                    try:
-                        if client.GetFrame():
-                            HasFrame = True
-                        timeout -= 1
-                        if timeout < 0:
-                            print('Failed to get frame')
-                            sys.exit()
-                    except ViconDataStream.DataStreamException:
-                        client.GetFrame()
-                client.SetStreamMode(ViconDataStream.Client.StreamMode.EServerPush)
+                signals = read_frame_signals(client)
+                timestamp = time.time()
+                segmenter.update_side(segmenter.right, signals.cop_r, signals.frz, timestamp)
+                segmenter.update_side(segmenter.left, signals.cop_l, signals.flz, timestamp)
 
-                copR, copL = 0, 0
-                devices = client.GetDeviceNames()
-                for deviceName, deviceType in devices:
-                    deviceOutputDetails = client.GetDeviceOutputDetails(deviceName)
-                    for outputName, componentName, unit in deviceOutputDetails:
-                        if componentName == "Cy":
-                            values, occluded = client.GetDeviceOutputValues(deviceName, outputName, componentName)
-                            if deviceName == "Right":
-                                # copR = np.abs(values[0])
-                                copR = values[0]
-                            elif deviceName == "Left":
-                                # copL = np.abs(values[0])
-                                copL = values[0]
-
-                Flz, Frz, Flznorm, Frznorm = 0, 0, 0, 0
-                forceplates = client.GetForcePlates()
-                for plate in forceplates:
-                    globalForceVectorData = client.GetGlobalForceVector(plate)
-                    if plate == 1:
-                        # Frz = abs(globalForceVectorData[0][2])
-                        Frz = globalForceVectorData[0][2]
-                        # Frznorm = Frz / (bw * 10)
-                    if plate == 2:
-                        # Flz = abs(globalForceVectorData[0][2])
-                        Flz = globalForceVectorData[0][2]
-                        # Flznorm = Flz / (bw * 10)
+                if segmenter.right.heel_strike:
+                    print("********")
 
                 try:
                     treadmill_data = {
-                        "vicon_timestamp": time.time(),
-                        "copR": copR,
-                        "copL": copL,
-                        "Frz": Frz,
-                        "Flz": Flz,
+                        "vicon_timestamp": timestamp,
+                        "copR": signals.cop_r,
+                        "copL": signals.cop_l,
+                        "Frz": signals.frz,
+                        "Flz": signals.flz,
                     }
+                    if segmenter.both_ready():
+                        treadmill_data["percent_gcR"] = segmenter.right.percent_gc
+                        treadmill_data["percent_gcL"] = segmenter.left.percent_gc
                     treadmill_data_str = json.dumps(treadmill_data)
                     Jetson.send_data(treadmill_data_str)
                     print(f"[DATA SENT] {treadmill_data_str}")
