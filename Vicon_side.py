@@ -13,6 +13,8 @@ from utils_rdVicon import connect_vicon, read_frame_signals
 
 START_DELAY_S = 10
 TRIAL_DURATION_S = 30
+# Rolling window (cycles) for gait-phase estimation; typical range is 5-10.
+GAIT_AVG_WINDOW_CYCLES = 5
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('host', nargs='?', help="Host name, in the format of server:port", default="localhost:801")
@@ -85,7 +87,7 @@ try:
             else:
                 print("[ERROR] No Jetson client socket available for start logging signal")
 
-            segmenter = GaitSegmenter()
+            segmenter = GaitSegmenter(avg_window_cycles=GAIT_AVG_WINDOW_CYCLES)
             segmenter.reset()
             timer_flag = 0
             while running:
@@ -105,20 +107,19 @@ try:
 
                 # if segmenter.right.heel_strike:
                 #     print("********RHS**************")
-                if segmenter.left.heel_strike:
-                    print("********LHS**************\n\n")
+                # if segmenter.left.heel_strike:
+                #     print("********LHS**************\n\n")
 
                 try:
                     treadmill_data = {
                         "vicon_timestamp": timestamp,
-                        "copR": signals.cop_r,
-                        "copL": signals.cop_l,
-                        "Frz": signals.frz,
-                        "Flz": signals.flz,
+                        # "copR": signals.cop_r,
+                        # "copL": signals.cop_l,
+                        # "Frz": signals.frz,
+                        # "Flz": signals.flz,
+                        "percent_gcR": segmenter.right.percent_gc,
+                        "percent_gcL": segmenter.left.percent_gc,
                     }
-                    if segmenter.both_ready():
-                        treadmill_data["percent_gcR"] = segmenter.right.percent_gc
-                        treadmill_data["percent_gcL"] = segmenter.left.percent_gc
                     treadmill_data_str = json.dumps(treadmill_data)
                     Jetson.send_data(treadmill_data_str)
                     # print(f"[DATA SENT] {treadmill_data_str}")

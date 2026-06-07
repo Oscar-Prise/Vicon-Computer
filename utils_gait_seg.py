@@ -1,6 +1,10 @@
 """Heel-strike gait segmentation from raw Vicon COP signals.
 
 Heel strike is detected when COP transitions from 0 to a positive value.
+The first heel strike per foot (standing contact at trial start) is ignored
+for gait-cycle counting and averaging; counting begins on the second strike.
+Gait phase (percent_gc) uses the mean cycle duration over the most recent
+avg_window_cycles completed cycles (configurable, typically 5-10).
 All input data is kept unprocessed (no abs, no normalization).
 """
 
@@ -29,6 +33,7 @@ class GaitSideState:
     """Runtime state for one foot."""
 
     prev_cop: float = 0.0
+    initial_hs_seen: bool = False
     gc_count: int = 0
     time_gc: list[float] = field(default_factory=list)
     avg_time_gc: float = 0.0
@@ -42,6 +47,7 @@ class GaitSideState:
 
     def reset(self) -> None:
         self.prev_cop = 0.0
+        self.initial_hs_seen = False
         self.gc_count = 0
         self.time_gc = []
         self.avg_time_gc = 0.0
@@ -57,7 +63,8 @@ class GaitSideState:
 class GaitSegmenter:
     """Stateful heel-strike tracker for left and right feet."""
 
-    def __init__(self) -> None:
+    def __init__(self, avg_window_cycles: int = 5) -> None:
+        self.avg_window_cycles = avg_window_cycles
         self.right = GaitSideState()
         self.left = GaitSideState()
 
@@ -98,7 +105,10 @@ class GaitSegmenter:
         side.prev_cop = cop
 
         if side.heel_strike:
-            if side.gc_count == 0:
+            if not side.initial_hs_seen:
+                # Skip standing contact at trial start (COP already on plate at t=0).
+                side.initial_hs_seen = True
+            elif side.gc_count == 0:
                 side.gc_count += 1
                 side.time_hs = timestamp
             else:
@@ -106,7 +116,8 @@ class GaitSegmenter:
                 side.prev_time_hs = side.time_hs
                 side.time_hs = timestamp
                 side.time_gc.append(side.time_hs - side.prev_time_hs)
-                side.avg_time_gc = float(np.mean(side.time_gc))
+                window = side.time_gc[-self.avg_window_cycles :]
+                side.avg_time_gc = float(np.mean(window))
 
     def update_from_vicon(
         self,
