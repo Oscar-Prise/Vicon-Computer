@@ -111,6 +111,19 @@ try:
                 #     print("********LHS**************\n\n")
 
                 try:
+                    # Original Vicon → Jetson payload (percent_gc only):
+                    # treadmill_data = {
+                    #     "vicon_timestamp": timestamp,
+                    #     # "copR": signals.cop_r,
+                    #     # "copL": signals.cop_l,
+                    #     # "Frz": signals.frz,
+                    #     # "Flz": signals.flz,
+                    #     "percent_gcR": segmenter.right.percent_gc,
+                    #     "percent_gcL": segmenter.left.percent_gc,
+                    # }
+
+                    # Phase Variable Jetson payload: keep percent_gc for comparison /
+                    # fallback, and add COP contact events for PW / unified phase.
                     treadmill_data = {
                         "vicon_timestamp": timestamp,
                         # "copR": signals.cop_r,
@@ -119,6 +132,10 @@ try:
                         # "Flz": signals.flz,
                         "percent_gcR": segmenter.right.percent_gc,
                         "percent_gcL": segmenter.left.percent_gc,
+                        "on_plateR": segmenter.right.on_plate,
+                        "on_plateL": segmenter.left.on_plate,
+                        "heel_strikeR": segmenter.right.heel_strike,
+                        "heel_strikeL": segmenter.left.heel_strike,
                     }
                     treadmill_data_str = json.dumps(treadmill_data)
                     Jetson.send_data(treadmill_data_str)
