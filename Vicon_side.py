@@ -12,12 +12,20 @@ from utils_gait_seg import GaitSegmenter
 from utils_rdVicon import connect_vicon, read_frame_signals
 
 START_DELAY_S = 10
-TRIAL_DURATION_S = 30
+TRIAL_DURATION_S = 80
 WALK_SPEED_MS = "1.2"
-# Hard brake at trial end (m/s^2). 0.5 is gradual (~2.4 s from 1.2); 3.0 is near-immediate.
+# Mid-trial: sharp stop at 45 s, resume walk at 50 s, then walk until 80 s.
+MID_STOP_S = 45
+MID_RESUME_S = 50
+# Hard brake (m/s^2). 0.5 is gradual (~2.4 s from 1.2); 3.0 is near-immediate.
 STOP_DECEL_MS2 = "3.0"
 # Rolling window (cycles) for gait-phase estimation; typical range is 5-10.
 GAIT_AVG_WINDOW_CYCLES = 5
+
+
+def set_treadmill_speed(remote, vel_ms, decel_ms2="0.5"):
+    """Send a one-shot Bertec speed command (same L/R)."""
+    remote.run_treadmill(vel_ms, "0.5", decel_ms2, vel_ms, "0.5", decel_ms2)
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('host', nargs='?', help="Host name, in the format of server:port", default="localhost:801")
@@ -80,15 +88,8 @@ try:
                 time.sleep(1)
             print("Starting trial now.\n", flush=True)
 
-            params = {
-                'leftVel': WALK_SPEED_MS, 'leftAccel': '0.5', 'leftDecel': '0.5',
-                'rightVel': WALK_SPEED_MS, 'rightAccel': '0.5', 'rightDecel': '0.5'
-            }
             print(f"Starting treadmill at {WALK_SPEED_MS} m/s...", flush=True)
-            remote.run_treadmill(
-                params['leftVel'], params['leftAccel'], params['leftDecel'],
-                params['rightVel'], params['rightAccel'], params['rightDecel']
-            )
+            set_treadmill_speed(remote, WALK_SPEED_MS)
 
             Nexus_notifier.notify()
 
@@ -100,11 +101,27 @@ try:
             segmenter = GaitSegmenter(avg_window_cycles=GAIT_AVG_WINDOW_CYCLES)
             segmenter.reset()
             timer_flag = 0
+            mid_stop_sent = False
+            mid_resume_sent = False
             while running:
                 if timer_flag == 0:
                     start_time_trial = time.time()
                     timer_flag = 1
                 elapsed_time_trial = time.time() - start_time_trial
+
+                # 0–45 s walk → sharp stop → hold → 50–80 s walk again
+                if not mid_stop_sent and elapsed_time_trial >= MID_STOP_S:
+                    print(f"[{elapsed_time_trial:.1f}s] Sharp stop", flush=True)
+                    set_treadmill_speed(remote, "0", STOP_DECEL_MS2)
+                    mid_stop_sent = True
+                elif not mid_resume_sent and elapsed_time_trial >= MID_RESUME_S:
+                    print(
+                        f"[{elapsed_time_trial:.1f}s] Resume {WALK_SPEED_MS} m/s",
+                        flush=True,
+                    )
+                    set_treadmill_speed(remote, WALK_SPEED_MS)
+                    mid_resume_sent = True
+
                 if elapsed_time_trial >= TRIAL_DURATION_S:
                     print(f"Stopping trial after {TRIAL_DURATION_S} seconds")
                     running = False
@@ -154,15 +171,8 @@ try:
                     print(f"[ERROR] Failed to send data: {e}")
                     break
 
-            # Immediate stop after walk bout (no 0.6 m/s slowdown phase).
-            params = {
-                'leftVel': '0', 'leftAccel': '0.5', 'leftDecel': STOP_DECEL_MS2,
-                'rightVel': '0', 'rightAccel': '0.5', 'rightDecel': STOP_DECEL_MS2
-            }
-            remote.run_treadmill(
-                params['leftVel'], params['leftAccel'], params['leftDecel'],
-                params['rightVel'], params['rightAccel'], params['rightDecel']
-            )
+            print("Final stop", flush=True)
+            set_treadmill_speed(remote, "0", STOP_DECEL_MS2)
 
             Nexus_notifier.close_socket()
 
