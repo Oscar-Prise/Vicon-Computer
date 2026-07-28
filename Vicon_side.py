@@ -62,21 +62,23 @@ try:
 
             port_number = int(input("Input Port number: "))
 
-            # Countdown first — nothing starts until this finishes.
+            rand_id = random.randint(0, 2**32 - 1)
+            Nexus_notifier = CaptureNotifier(
+                name=trial_name, notes=trial_notes, description=trial_description,
+                database_path=trial_path, delay_ms=0, packet_id=rand_id, port=port_number
+            )
+
+            # Wait until motors are on; countdown only starts after this.
+            input("Activate motors, then press Enter to start the countdown...")
+
             print(
-                f"\nPort set. Waiting {START_DELAY_S}s before treadmill / Nexus / Jetson start...",
+                f"\nMotors ready. Starting treadmill / Nexus / Jetson in {START_DELAY_S}s...",
                 flush=True,
             )
             for remaining in range(START_DELAY_S, 0, -1):
                 print(f"  {remaining}...", flush=True)
                 time.sleep(1)
             print("Starting trial now.\n", flush=True)
-
-            rand_id = random.randint(0, 2**32 - 1)
-            Nexus_notifier = CaptureNotifier(
-                name=trial_name, notes=trial_notes, description=trial_description,
-                database_path=trial_path, delay_ms=0, packet_id=rand_id, port=port_number
-            )
 
             params = {
                 'leftVel': WALK_SPEED_MS, 'leftAccel': '0.5', 'leftDecel': '0.5',
