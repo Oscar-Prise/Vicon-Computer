@@ -62,22 +62,27 @@ try:
 
             port_number = int(input("Input Port number: "))
 
+            # Countdown first — nothing starts until this finishes.
+            print(
+                f"\nPort set. Waiting {START_DELAY_S}s before treadmill / Nexus / Jetson start...",
+                flush=True,
+            )
+            for remaining in range(START_DELAY_S, 0, -1):
+                print(f"  {remaining}...", flush=True)
+                time.sleep(1)
+            print("Starting trial now.\n", flush=True)
+
             rand_id = random.randint(0, 2**32 - 1)
             Nexus_notifier = CaptureNotifier(
                 name=trial_name, notes=trial_notes, description=trial_description,
                 database_path=trial_path, delay_ms=0, packet_id=rand_id, port=port_number
             )
 
-            print(f"\nTrial ready. Starting treadmill and data collection in {START_DELAY_S} seconds...")
-            for remaining in range(START_DELAY_S, 0, -1):
-                print(f"  {remaining}...")
-                time.sleep(1)
-            print("Starting trial now.\n")
-
             params = {
                 'leftVel': WALK_SPEED_MS, 'leftAccel': '0.5', 'leftDecel': '0.5',
                 'rightVel': WALK_SPEED_MS, 'rightAccel': '0.5', 'rightDecel': '0.5'
             }
+            print(f"Starting treadmill at {WALK_SPEED_MS} m/s...", flush=True)
             remote.run_treadmill(
                 params['leftVel'], params['leftAccel'], params['leftDecel'],
                 params['rightVel'], params['rightAccel'], params['rightDecel']
