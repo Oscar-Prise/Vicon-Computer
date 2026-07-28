@@ -12,9 +12,12 @@ from utils_gait_seg import GaitSegmenter
 from utils_rdVicon import connect_vicon, read_frame_signals
 
 START_DELAY_S = 10
-TRIAL_DURATION_S = 60
+TRIAL_DURATION_S = 30
+WALK_SPEED_MS = "1.2"
+# Hard brake at trial end (m/s^2). 0.5 is gradual (~2.4 s from 1.2); 3.0 is near-immediate.
+STOP_DECEL_MS2 = "3.0"
 # Rolling window (cycles) for gait-phase estimation; typical range is 5-10.
-GAIT_AVG_WINDOW_CYCLES = 3
+GAIT_AVG_WINDOW_CYCLES = 5
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('host', nargs='?', help="Host name, in the format of server:port", default="localhost:801")
@@ -72,8 +75,8 @@ try:
             print("Starting trial now.\n")
 
             params = {
-                'leftVel': '1.2', 'leftAccel': '0.5', 'leftDecel': '0.5',
-                'rightVel': '1.2', 'rightAccel': '0.5', 'rightDecel': '0.5'
+                'leftVel': WALK_SPEED_MS, 'leftAccel': '0.5', 'leftDecel': '0.5',
+                'rightVel': WALK_SPEED_MS, 'rightAccel': '0.5', 'rightDecel': '0.5'
             }
             remote.run_treadmill(
                 params['leftVel'], params['leftAccel'], params['leftDecel'],
@@ -95,15 +98,6 @@ try:
                     start_time_trial = time.time()
                     timer_flag = 1
                 elapsed_time_trial = time.time() - start_time_trial
-                if elapsed_time_trial > 30:
-                    params = {
-                        'leftVel': '0.6', 'leftAccel': '0.5', 'leftDecel': '0.5',
-                        'rightVel': '0.6', 'rightAccel': '0.5', 'rightDecel': '0.5'
-                    }
-                    remote.run_treadmill(
-                        params['leftVel'], params['leftAccel'], params['leftDecel'],
-                        params['rightVel'], params['rightAccel'], params['rightDecel']
-                    )
                 if elapsed_time_trial >= TRIAL_DURATION_S:
                     print(f"Stopping trial after {TRIAL_DURATION_S} seconds")
                     running = False
@@ -153,9 +147,10 @@ try:
                     print(f"[ERROR] Failed to send data: {e}")
                     break
 
+            # Immediate stop after walk bout (no 0.6 m/s slowdown phase).
             params = {
-                'leftVel': '0', 'leftAccel': '0.5', 'leftDecel': '0.5',
-                'rightVel': '0', 'rightAccel': '0.5', 'rightDecel': '0.5'
+                'leftVel': '0', 'leftAccel': '0.5', 'leftDecel': STOP_DECEL_MS2,
+                'rightVel': '0', 'rightAccel': '0.5', 'rightDecel': STOP_DECEL_MS2
             }
             remote.run_treadmill(
                 params['leftVel'], params['leftAccel'], params['leftDecel'],
