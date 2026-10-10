@@ -12,13 +12,13 @@ from utils_gait_seg import GaitSegmenter
 from utils_rdVicon import connect_vicon, read_frame_signals
 
 START_DELAY_S = 10
-TRIAL_DURATION_S = 80
+TRIAL_DURATION_S = 30
 WALK_SPEED_MS = "1.2"
-# Mid-trial: sharp stop at 45 s, resume walk at 50 s, then walk until 80 s.
-MID_STOP_S = 45
-MID_RESUME_S = 50
-# Hard brake (m/s^2). 0.5 is gradual (~2.4 s from 1.2); 3.0 is near-immediate.
-STOP_DECEL_MS2 = "3.0"
+# Continuous 30 s trial at 1.2 m/s; no mid-trial stop/resume.
+MID_STOP_S = 999
+MID_RESUME_S = 1000
+# Use a gentle deceleration for the final stop at the end of the trial.
+STOP_DECEL_MS2 = "0.5"
 # Rolling window (cycles) for gait-phase estimation; typical range is 5-10.
 GAIT_AVG_WINDOW_CYCLES = 5
 
@@ -109,17 +109,15 @@ try:
                     timer_flag = 1
                 elapsed_time_trial = time.time() - start_time_trial
 
-                # 0–45 s walk → sharp stop → hold → 50–80 s walk again
+                # Continuous walk for the full trial duration; no mid-trial stop/resume.
                 if not mid_stop_sent and elapsed_time_trial >= MID_STOP_S:
-                    print(f"[{elapsed_time_trial:.1f}s] Sharp stop", flush=True)
-                    set_treadmill_speed(remote, "0", STOP_DECEL_MS2)
+                    print(f"[{elapsed_time_trial:.1f}s] Mid-trial stop disabled", flush=True)
                     mid_stop_sent = True
                 elif not mid_resume_sent and elapsed_time_trial >= MID_RESUME_S:
                     print(
-                        f"[{elapsed_time_trial:.1f}s] Resume {WALK_SPEED_MS} m/s",
+                        f"[{elapsed_time_trial:.1f}s] Mid-trial resume disabled",
                         flush=True,
                     )
-                    set_treadmill_speed(remote, WALK_SPEED_MS)
                     mid_resume_sent = True
 
                 if elapsed_time_trial >= TRIAL_DURATION_S:
