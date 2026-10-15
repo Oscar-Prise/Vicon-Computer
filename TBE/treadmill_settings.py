@@ -18,9 +18,9 @@ DEFAULT_DECEL = 0.5
 STOP_DECEL = 0.5
 
 SETTINGS = {
-    # Previous TBE trial: continuous 30 s at 1.2 m/s, then stop
+    # Test run: continuous 45 s at 1.2 m/s, then stop
     "default": [
-        {"speed": 1.2, "duration": 30},
+        {"speed": 1.2, "duration": 45},
     ],
 
     # Example for later:
