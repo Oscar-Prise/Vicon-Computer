@@ -97,7 +97,7 @@ class GaitSegmenter:
             side.avg_time_gc = 0.0
             side.percent_gc = 0.0
         elif side.avg_time_gc > 0:
-            side.percent_gc = (timestamp - side.time_hs) / side.avg_time_gc
+            side.percent_gc = min(max((timestamp - side.time_hs) / side.avg_time_gc, 0.0), 1.0)
         else:
             side.percent_gc = 0.0
 
