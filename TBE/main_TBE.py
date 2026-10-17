@@ -1,12 +1,12 @@
 # TBE experiment, single-operator version: Vicon + Nexus + Bertec + Jetson in one script.
 #
-# Flow: trial name -> Jetson connects -> Nexus port -> enable motors -> countdown
-# (time to walk up to the treadmill) -> treadmill/Nexus/Jetson start together ->
+# Condition: walk 45 s at 1.2 m/s (LG_1p2_ExoOn).
+# Flow: Jetson connects -> Nexus port -> enable motors -> 15 s heads-up countdown
+# -> treadmill starts and Vicon starts recording together ->
 # Vicon COP is streamed to the Jetson as gait-phase data -> treadmill stops.
 #
 # Usage:
-#   python main_TBE.py                       # runs the "default" setting, 15 s countdown
-#   python main_TBE.py steps --delay 20
+#   python main_TBE.py                       # 45 s at 1.2 m/s, 15 s heads-up
 #   python main_TBE.py --list
 #   python main_TBE.py --host localhost:801 --jetson-ip 172.24.44.177
 
@@ -23,7 +23,8 @@ import random
 import threading
 import time
 
-START_DELAY_S = 15
+START_DELAY_S = 15  # heads-up before the belts and Vicon recording start
+TRIAL_NAME = "LG_1p2_ExoOn"
 JETSON_IP = "172.24.44.177"
 JETSON_PORT = 11
 # Rolling window (cycles) for gait-phase estimation; typical range is 5-10.
@@ -103,7 +104,7 @@ def main():
     Jetson = None
     Nexus_notifier = None
     try:
-        trial_name = input("Enter trial number: ")
+        trial_name = TRIAL_NAME
 
         Bertec = BertecController()
         if Bertec.start_connection() is None:
@@ -111,6 +112,8 @@ def main():
             return
         print("\nPress OK in Bertec Software!\n")
         print("Trial name:", trial_name)
+        walk_s = sum(seg["duration"] for seg in segments)
+        print(f"Walk {walk_s}s at 1.2 m/s, {args.delay}s heads-up")
         print(f"Setting: {args.setting}")
         for i, seg in enumerate(segments):
             print(f"  {i + 1}. {seg}")
@@ -129,16 +132,16 @@ def main():
             delay_ms=0, packet_id=random.randint(0, 2**32 - 1), port=port_number
         )
 
-        input(f"Activate motors, then press Enter to start the {args.delay}s countdown...")
+        input(f"Activate motors, then press Enter to start the {args.delay}s heads-up...")
         for remaining in range(args.delay, 0, -1):
             print(f"  {remaining}...", flush=True)
             time.sleep(1)
-        print("Starting trial now.\n", flush=True)
+        print("Heads-up finished. Starting treadmill and Vicon recording.\n", flush=True)
 
         profile = ProfileRunner(Bertec, segments)
         trial_start = time.time()
-        profile.update(0.0)  # first segment starts the treadmill
-        Nexus_notifier.notify()
+        profile.update(0.0)  # start the treadmill
+        Nexus_notifier.notify()  # start Vicon recording
         if Jetson.client_socket:
             send_start_logging_signal(Jetson.client_socket)
         else:
@@ -154,8 +157,8 @@ def main():
 
             signals = read_frame_signals(client)
             timestamp = time.time()
-            segmenter.update_side(segmenter.right, signals.cop_r, signals.frz, timestamp)
-            segmenter.update_side(segmenter.left, signals.cop_l, signals.flz, timestamp)
+            segmenter.update_side(segmenter.right, signals.cop_r, timestamp)
+            segmenter.update_side(segmenter.left, signals.cop_l, timestamp)
 
             try:
                 # percent_gc plus COP contact events for the Phase Variable on the Jetson

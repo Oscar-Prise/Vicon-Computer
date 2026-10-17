@@ -18,7 +18,7 @@ DEFAULT_DECEL = 0.5
 STOP_DECEL = 0.5
 
 SETTINGS = {
-    # Test run: continuous 45 s at 1.2 m/s, then stop
+    # LG_1p2_ExoOn: continuous 45 s at 1.2 m/s, then stop
     "default": [
         {"speed": 1.2, "duration": 45},
     ],

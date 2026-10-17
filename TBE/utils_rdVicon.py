@@ -1,4 +1,4 @@
-"""Read raw COP and GRF signals from a Vicon DataStream client."""
+"""Read raw COP signals from a Vicon DataStream client."""
 
 from __future__ import annotations
 
@@ -16,8 +16,6 @@ class ViconFrameSignals:
 
     cop_r: float = 0.0
     cop_l: float = 0.0
-    frz: float = 0.0
-    flz: float = 0.0
 
 
 def connect_vicon(host: str) -> ViconDataStream.Client:
@@ -71,34 +69,11 @@ def read_cop_from_vicon(client: ViconDataStream.Client) -> tuple[float, float]:
     return cop_right, cop_left
 
 
-def read_grf_from_vicon(
-    client: ViconDataStream.Client,
-    plate_right: int = 1,
-    plate_left: int = 2,
-) -> tuple[float, float]:
-    """Read raw vertical GRF from force plates. Returns (frz, flz)."""
-    frz = 0.0
-    flz = 0.0
-    forceplates = client.GetForcePlates()
-    for plate in forceplates:
-        global_force_vector_data = client.GetGlobalForceVector(plate)
-        if plate == plate_right:
-            frz = float(global_force_vector_data[0][2])
-        elif plate == plate_left:
-            flz = float(global_force_vector_data[0][2])
-    return frz, flz
-
-
 def read_frame_signals(
     client: ViconDataStream.Client,
-    plate_right: int = 1,
-    plate_left: int = 2,
     timeout: int = 50,
 ) -> ViconFrameSignals:
-    """Wait for the next frame and read raw COP/GRF values."""
+    """Wait for the next frame and read raw COP values."""
     wait_for_frame(client, timeout=timeout)
     cop_r, cop_l = read_cop_from_vicon(client)
-    frz, flz = read_grf_from_vicon(
-        client, plate_right=plate_right, plate_left=plate_left
-    )
-    return ViconFrameSignals(cop_r=cop_r, cop_l=cop_l, frz=frz, flz=flz)
+    return ViconFrameSignals(cop_r=cop_r, cop_l=cop_l)

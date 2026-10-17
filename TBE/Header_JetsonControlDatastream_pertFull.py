@@ -17,21 +17,6 @@ class StreamJetson:
         self.data_to_send = data + '\n'  # Ensure data ends with a newline for proper parsing
         # print(f"[DEBUG] Data to send updated: {self.data_to_send}")  # Debugging
 
-    def send_trigger_now(self,pertnum):
-        """Send perturbation trigger immediately without affecting data streaming."""
-        if self.connection and self.client_socket:
-            try:
-                trigger_msg = f"{pertnum}\n"
-                self.client_socket.sendall(trigger_msg.encode('utf-8'))
-                print(f"[TRIGGER SENT] Perturbation trigger at {time.time()}")
-                return True
-            except Exception as e:
-                print(f"[ERROR] Failed to send trigger: {e}")
-                return False
-        else:
-            print("[WARNING] No active connection for trigger")
-            return False
-
     def handle_client(self, client_socket, client_address):
         print(f"[NEW CONNECTION] Jetson connected from {client_address}.")
         self.connection = True

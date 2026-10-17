@@ -1,5 +1,5 @@
 # Heel-strike detection test: runs the treadmill and prints 3 on every RIGHT heel strike.
-# No Nexus capture and no Jetson needed. Raw COP/Fz are saved to a CSV so you can
+# No Nexus capture and no Jetson needed. Raw COP is saved to a CSV so you can
 # check the detection afterwards.
 #
 # Usage:
@@ -57,18 +57,17 @@ def main():
 
         with open(args.csv, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["t_s", "cop_r", "frz", "cop_l", "flz", "rhs", "lhs"])
+            writer.writerow(["t_s", "cop_r", "cop_l", "rhs", "lhs"])
             while time.time() - trial_start < args.duration:
                 signals = read_frame_signals(client)
                 now = time.time()
-                segmenter.update_side(segmenter.right, signals.cop_r, signals.frz, now)
-                segmenter.update_side(segmenter.left, signals.cop_l, signals.flz, now)
+                segmenter.update_side(segmenter.right, signals.cop_r, now)
+                segmenter.update_side(segmenter.left, signals.cop_l, now)
 
                 if segmenter.right.heel_strike:
                     count += 1
                     print(3, flush=True)
-                writer.writerow([f"{now - trial_start:.4f}", signals.cop_r, signals.frz,
-                                 signals.cop_l, signals.flz,
+                writer.writerow([f"{now - trial_start:.4f}", signals.cop_r, signals.cop_l,
                                  int(segmenter.right.heel_strike), int(segmenter.left.heel_strike)])
         print(f"\nTrial over. {count} right heel strikes detected. Raw data in {args.csv}")
     except KeyboardInterrupt:
