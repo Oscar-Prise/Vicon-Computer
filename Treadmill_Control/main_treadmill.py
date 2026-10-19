@@ -1,17 +1,31 @@
-# Run the Bertec treadmill with a countdown delay, using a profile from treadmill_settings.py
+# Run the Bertec treadmill (and optionally record the trial in Vicon Nexus)
 #
-# Usage:
-#   python main_treadmill.py                 # runs the "default" setting
-#   python main_treadmill.py steps           # runs the "steps" setting
-#   python main_treadmill.py default --delay 10
-#   python main_treadmill.py --list          # show available settings
+# Flow: connect Bertec -> enter Nexus port (if VICON_REC) -> Enter -> countdown
+#       -> treadmill starts (+ Vicon capture starts) -> walk for TRIAL_TIME_S
+#       -> treadmill stops (+ Vicon capture stops, saved as TRIAL_NAME)
+#
+# Usage: edit the parameters below, then run
+#   python main_treadmill.py
+#
+# Nexus: enable the UDP remote trigger and set the same port number entered here.
+
+# ===================== Changeable parameters =====================
+VICON_REC = True            # True: also record in Vicon Nexus. False: Bertec treadmill only
+TRIAL_NAME = "NoExo_LG_1p2" # Vicon trial name
+NEXUS_PORT = None           # Nexus UDP trigger port; None = ask at runtime
+
+START_DELAY_S = 10          # countdown before the treadmill starts (s)
+TRIAL_TIME_S = 30           # how long the treadmill runs (s), ramp-up included
+
+SPEED = 1.2                 # belt speed (m/s), both belts. Negative = backwards
+ACCEL = 0.5                 # acceleration used to speed up (m/s^2)
+DECEL = 0.5                 # deceleration used to stop at the end (m/s^2)
+# =================================================================
 
 from Header_BertecControl import BertecController
-from treadmill_settings import SETTINGS, DEFAULT_ACCEL, DEFAULT_DECEL, STOP_DECEL
-import argparse
+from Header_NexusControl import CaptureNotifier
+import random
 import time
-
-START_DELAY_S = 15
 
 
 def set_treadmill(Bertec, left_vel, right_vel, accel, decel):
@@ -22,42 +36,10 @@ def set_treadmill(Bertec, left_vel, right_vel, accel, decel):
 
 def stop_treadmill(Bertec):
     print("\nTreadmill stop", flush=True)
-    set_treadmill(Bertec, 0, 0, DEFAULT_ACCEL, STOP_DECEL)
-
-
-def run_setting(Bertec, segments):
-    trial_start = time.time()
-    for i, seg in enumerate(segments):
-        left = seg.get("left", seg.get("speed"))
-        right = seg.get("right", seg.get("speed"))
-        accel = seg.get("accel", DEFAULT_ACCEL)
-        decel = seg.get("decel", DEFAULT_DECEL)
-        duration = seg["duration"]
-
-        print(f"[{time.time() - trial_start:6.1f}s] Segment {i + 1}/{len(segments)}: "
-              f"L={left} m/s, R={right} m/s for {duration}s", flush=True)
-        set_treadmill(Bertec, left, right, accel, decel)
-        time.sleep(duration)
+    set_treadmill(Bertec, 0, 0, ACCEL, DECEL)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the Bertec treadmill with a start delay.")
-    parser.add_argument("setting", nargs="?", default="default", help="Setting name from treadmill_settings.py")
-    parser.add_argument("--delay", type=int, default=START_DELAY_S, help="Countdown before start (s)")
-    parser.add_argument("--list", action="store_true", help="List available settings and exit")
-    args = parser.parse_args()
-
-    if args.list:
-        for name, segments in SETTINGS.items():
-            total = sum(seg["duration"] for seg in segments)
-            print(f"  {name}: {len(segments)} segment(s), {total}s total")
-        return
-
-    if args.setting not in SETTINGS:
-        print(f"Unknown setting '{args.setting}'. Available: {', '.join(SETTINGS)}")
-        return
-    segments = SETTINGS[args.setting]
-
     # Create an instance of BertecControl
     Bertec = BertecController()
     res = Bertec.start_connection()
@@ -65,24 +47,40 @@ def main():
         print("Could not connect to Bertec. Is the Bertec software open with remote control enabled?")
         return
 
-    print(f"\nSetting: {args.setting}")
-    for i, seg in enumerate(segments):
-        print(f"  {i + 1}. {seg}")
+    print(f"\nTreadmill: {SPEED} m/s for {TRIAL_TIME_S}s (accel {ACCEL}, decel {DECEL} m/s^2)")
+    print(f"Vicon recording: {'ON, trial name ' + TRIAL_NAME if VICON_REC else 'OFF (Bertec only)'}")
     print("\nPress OK in Bertec Software if prompted!")
 
+    Nexus_notifier = None
+    recording = False
     try:
-        input(f"\nPress Enter to start the {args.delay}s countdown...")
-        for remaining in range(args.delay, 0, -1):
+        if VICON_REC:
+            # Port number must match the one in Nexus (use a new port if Nexus ignores a repeated trigger)
+            port_number = NEXUS_PORT if NEXUS_PORT is not None else int(input("Input Nexus port number: "))
+            Nexus_notifier = CaptureNotifier(
+                name=TRIAL_NAME, notes="", description="", database_path="",
+                delay_ms=0, packet_id=random.randint(0, 2**32 - 1), port=port_number
+            )
+
+        input(f"\nPress Enter to start the {START_DELAY_S}s countdown...")
+        for remaining in range(START_DELAY_S, 0, -1):
             print(f"  {remaining}...", flush=True)
             time.sleep(1)
         print("Starting treadmill now.\n", flush=True)
 
-        run_setting(Bertec, segments)
+        if VICON_REC:
+            Nexus_notifier.notify()  # start Vicon recording
+            recording = True
+        set_treadmill(Bertec, SPEED, SPEED, ACCEL, DECEL)
+        time.sleep(TRIAL_TIME_S)
+        print(f"Trial finished after {TRIAL_TIME_S}s.", flush=True)
     except KeyboardInterrupt:
         print("\nInterrupted by user.")
     finally:
-        # Always stop the belts, even on Ctrl+C or an error
+        # Always stop the belts and the Vicon capture, even on Ctrl+C or an error
         stop_treadmill(Bertec)
+        if recording:
+            Nexus_notifier.stop_capture()
         Bertec.stop_connection()
         print("Done.")
 
