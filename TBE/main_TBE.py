@@ -1,34 +1,42 @@
 # TBE experiment, single-operator version: Vicon + Nexus + Bertec + Jetson in one script.
 #
-# Condition: walk 45 s at 1.2 m/s (LG_1p2_ExoOn).
-# Flow: Jetson connects -> Nexus port -> enable motors -> 15 s heads-up countdown
-# -> treadmill starts and Vicon starts recording together ->
-# Vicon COP is streamed to the Jetson as gait-phase data -> treadmill stops.
+# Flow: Jetson connects -> Nexus port (if VICON_REC) -> enable motors -> countdown
+# -> treadmill starts (+ Vicon starts recording) ->
+# Vicon COP is streamed to the Jetson as gait-phase data for TRIAL_TIME_S
+# -> treadmill stops (+ Vicon recording stops, saved as TRIAL_NAME).
 #
-# Usage:
-#   python main_TBE.py                       # 45 s at 1.2 m/s, 15 s heads-up
-#   python main_TBE.py --list
-#   python main_TBE.py --host localhost:801 --jetson-ip 172.24.44.177
+# Usage: edit the parameters below, then run
+#   python main_TBE.py
+
+# ===================== Changeable parameters =====================
+VICON_REC = True             # True: also record the trial in Vicon Nexus. False: no Nexus recording
+                             # (the Vicon DataStream is still used for COP / gait phase either way)
+TRIAL_NAME = "LG_1p2_ExoOn"  # Vicon trial name
+NEXUS_PORT = None            # Nexus UDP trigger port; None = ask at runtime
+
+START_DELAY_S = 15           # heads-up countdown before the treadmill starts (s)
+TRIAL_TIME_S = 45            # how long the treadmill runs (s), ramp-up included
+
+SPEED = 1.2                  # belt speed (m/s), both belts. Negative = backwards
+ACCEL = 0.5                  # acceleration used to speed up (m/s^2)
+DECEL = 0.5                  # deceleration used to stop at the end (m/s^2)
+
+VICON_HOST = "localhost:801" # Vicon DataStream host, server:port
+JETSON_IP = "172.24.44.177"  # IP this PC binds for the Jetson server
+JETSON_PORT = 11
+GAIT_AVG_WINDOW_CYCLES = 5   # rolling window (cycles) for gait-phase estimation; typical 5-10
+# =================================================================
 
 from vicon_dssdk import ViconDataStream
 from Header_NexusControl import CaptureNotifier
 from Header_BertecControl import BertecController
 from Header_JetsonControlDatastream_pertFull import StreamJetson
-from treadmill_settings import SETTINGS, DEFAULT_ACCEL, DEFAULT_DECEL, STOP_DECEL
 from utils_gait_seg import GaitSegmenter
 from utils_rdVicon import connect_vicon, read_frame_signals
-import argparse
 import json
 import random
 import threading
 import time
-
-START_DELAY_S = 15  # heads-up before the belts and Vicon recording start
-TRIAL_NAME = "LG_1p2_ExoOn"
-JETSON_IP = "172.24.44.177"
-JETSON_PORT = 11
-# Rolling window (cycles) for gait-phase estimation; typical range is 5-10.
-GAIT_AVG_WINDOW_CYCLES = 5
 
 
 def set_treadmill(Bertec, left_vel, right_vel, accel, decel):
@@ -39,7 +47,7 @@ def set_treadmill(Bertec, left_vel, right_vel, accel, decel):
 
 def stop_treadmill(Bertec):
     print("\nTreadmill stop", flush=True)
-    set_treadmill(Bertec, 0, 0, DEFAULT_ACCEL, STOP_DECEL)
+    set_treadmill(Bertec, 0, 0, ACCEL, DECEL)
 
 
 def send_start_logging_signal(client_socket):
@@ -47,55 +55,9 @@ def send_start_logging_signal(client_socket):
     print("[SERVER] Sent start logging signal to client")
 
 
-class ProfileRunner:
-    """Steps through treadmill segments by elapsed time without blocking the Vicon loop."""
-
-    def __init__(self, Bertec, segments):
-        self.Bertec = Bertec
-        self.segments = segments
-        self.total = sum(seg["duration"] for seg in segments)
-        self.idx = -1
-        self.next_change = 0.0
-
-    def update(self, elapsed):
-        """Send the next segment command when due. Returns False once the profile is over."""
-        if elapsed >= self.total:
-            return False
-        if elapsed >= self.next_change:
-            self.idx += 1
-            seg = self.segments[self.idx]
-            left = seg.get("left", seg.get("speed"))
-            right = seg.get("right", seg.get("speed"))
-            accel = seg.get("accel", DEFAULT_ACCEL)
-            decel = seg.get("decel", DEFAULT_DECEL)
-            print(f"[{elapsed:6.1f}s] Segment {self.idx + 1}/{len(self.segments)}: "
-                  f"L={left} m/s, R={right} m/s for {seg['duration']}s", flush=True)
-            set_treadmill(self.Bertec, left, right, accel, decel)
-            self.next_change += seg["duration"]
-        return True
-
-
 def main():
-    parser = argparse.ArgumentParser(description="TBE experiment with treadmill profile and start delay.")
-    parser.add_argument("setting", nargs="?", default="default", help="Setting name from treadmill_settings.py")
-    parser.add_argument("--delay", type=int, default=START_DELAY_S, help="Countdown before start (s)")
-    parser.add_argument("--host", default="localhost:801", help="Vicon host, server:port")
-    parser.add_argument("--jetson-ip", default=JETSON_IP, help="IP this PC binds for the Jetson server")
-    parser.add_argument("--list", action="store_true", help="List available settings and exit")
-    args = parser.parse_args()
-
-    if args.list:
-        for name, segments in SETTINGS.items():
-            total = sum(seg["duration"] for seg in segments)
-            print(f"  {name}: {len(segments)} segment(s), {total}s total")
-        return
-    if args.setting not in SETTINGS:
-        print(f"Unknown setting '{args.setting}'. Available: {', '.join(SETTINGS)}")
-        return
-    segments = SETTINGS[args.setting]
-
     try:
-        client = connect_vicon(args.host)
+        client = connect_vicon(VICON_HOST)
     except ViconDataStream.DataStreamException as e:
         print('Handled data stream error', e)
         return
@@ -103,22 +65,18 @@ def main():
     Bertec = None
     Jetson = None
     Nexus_notifier = None
+    recording = False
     try:
-        trial_name = TRIAL_NAME
-
         Bertec = BertecController()
         if Bertec.start_connection() is None:
             print("Could not connect to Bertec. Is the Bertec software open with remote control enabled?")
             return
         print("\nPress OK in Bertec Software!\n")
-        print("Trial name:", trial_name)
-        walk_s = sum(seg["duration"] for seg in segments)
-        print(f"Walk {walk_s}s at 1.2 m/s, {args.delay}s heads-up")
-        print(f"Setting: {args.setting}")
-        for i, seg in enumerate(segments):
-            print(f"  {i + 1}. {seg}")
+        print(f"Treadmill: {SPEED} m/s for {TRIAL_TIME_S}s (accel {ACCEL}, decel {DECEL} m/s^2), "
+              f"{START_DELAY_S}s heads-up")
+        print(f"Vicon recording: {'ON, trial name ' + TRIAL_NAME if VICON_REC else 'OFF'}")
 
-        Jetson = StreamJetson(args.jetson_ip, JETSON_PORT)
+        Jetson = StreamJetson(JETSON_IP, JETSON_PORT)
         threading.Thread(target=Jetson.start_server, daemon=True).start()
         print("Jetson server started in a separate thread.")
         print("Waiting for Jetson to connect...")
@@ -126,22 +84,25 @@ def main():
             time.sleep(0.1)
         print("Jetson connected successfully.")
 
-        port_number = int(input("Input Port number: "))
-        Nexus_notifier = CaptureNotifier(
-            name=trial_name, notes="", description="", database_path="",
-            delay_ms=0, packet_id=random.randint(0, 2**32 - 1), port=port_number
-        )
+        if VICON_REC:
+            # Port number must match the one in Nexus (use a new port if Nexus ignores a repeated trigger)
+            port_number = NEXUS_PORT if NEXUS_PORT is not None else int(input("Input Nexus port number: "))
+            Nexus_notifier = CaptureNotifier(
+                name=TRIAL_NAME, notes="", description="", database_path="",
+                delay_ms=0, packet_id=random.randint(0, 2**32 - 1), port=port_number
+            )
 
-        input(f"Activate motors, then press Enter to start the {args.delay}s heads-up...")
-        for remaining in range(args.delay, 0, -1):
+        input(f"Activate motors, then press Enter to start the {START_DELAY_S}s heads-up...")
+        for remaining in range(START_DELAY_S, 0, -1):
             print(f"  {remaining}...", flush=True)
             time.sleep(1)
-        print("Heads-up finished. Starting treadmill and Vicon recording.\n", flush=True)
+        print("Heads-up finished. Starting treadmill.\n", flush=True)
 
-        profile = ProfileRunner(Bertec, segments)
         trial_start = time.time()
-        profile.update(0.0)  # start the treadmill
-        Nexus_notifier.notify()  # start Vicon recording
+        set_treadmill(Bertec, SPEED, SPEED, ACCEL, DECEL)  # start the treadmill
+        if VICON_REC:
+            Nexus_notifier.notify()  # start Vicon recording
+            recording = True
         if Jetson.client_socket:
             send_start_logging_signal(Jetson.client_socket)
         else:
@@ -150,9 +111,8 @@ def main():
         segmenter = GaitSegmenter(avg_window_cycles=GAIT_AVG_WINDOW_CYCLES)
         segmenter.reset()
         while True:
-            elapsed = time.time() - trial_start
-            if not profile.update(elapsed):
-                print(f"Stopping trial after {profile.total} seconds")
+            if time.time() - trial_start >= TRIAL_TIME_S:
+                print(f"Stopping trial after {TRIAL_TIME_S} seconds")
                 break
 
             signals = read_frame_signals(client)
@@ -178,17 +138,16 @@ def main():
     except KeyboardInterrupt:
         print("\nInterrupted by user.")
     finally:
-        # Always stop the belts, even on Ctrl+C or an error
+        # Always stop the belts and the Vicon capture, even on Ctrl+C or an error
         if Bertec is not None:
             stop_treadmill(Bertec)
             Bertec.stop_connection()
-        if Nexus_notifier is not None:
-            Nexus_notifier.close_socket()
+        if recording:
+            Nexus_notifier.stop_capture()
         if Jetson is not None and Jetson.client_socket:
             Jetson.connection = False
             Jetson.client_socket.close()
             print("Jetson server closed.")
-        print("Trial finished. Exiting experiment.")
 
 
 if __name__ == "__main__":

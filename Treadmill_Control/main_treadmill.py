@@ -1,8 +1,8 @@
-# Run the Bertec treadmill (and optionally record the trial in Vicon Nexus)
+# Run the Bertec treadmill and/or record the trial in Vicon Nexus
 #
-# Flow: connect Bertec -> enter Nexus port (if VICON_REC) -> Enter -> countdown
-#       -> treadmill starts (+ Vicon capture starts) -> walk for TRIAL_TIME_S
-#       -> treadmill stops (+ Vicon capture stops, saved as TRIAL_NAME)
+# Flow: connect Bertec (if TREADMILL_ON) -> enter Nexus port (if VICON_REC) -> Enter -> countdown
+#       -> treadmill starts (if TREADMILL_ON) + Vicon capture starts (if VICON_REC)
+#       -> trial runs for TRIAL_TIME_S -> treadmill stops + Vicon capture stops (saved as TRIAL_NAME)
 #
 # Usage: edit the parameters below, then run
 #   python main_treadmill.py
@@ -10,12 +10,13 @@
 # Nexus: enable the UDP remote trigger and set the same port number entered here.
 
 # ===================== Changeable parameters =====================
-VICON_REC = True            # True: also record in Vicon Nexus. False: Bertec treadmill only
+TREADMILL_ON = True         # True: run the treadmill. False: belts stay still (SPEED/ACCEL/DECEL ignored)
+VICON_REC = True            # True: record in Vicon Nexus. False: no Nexus recording
 TRIAL_NAME = "NoExo_LG_1p2" # Vicon trial name
 NEXUS_PORT = None           # Nexus UDP trigger port; None = ask at runtime
 
-START_DELAY_S = 10          # countdown before the treadmill starts (s)
-TRIAL_TIME_S = 30           # how long the treadmill runs (s), ramp-up included
+START_DELAY_S = 10          # countdown before the trial starts (s)
+TRIAL_TIME_S = 30           # trial length (s), treadmill ramp-up included
 
 SPEED = 1.2                 # belt speed (m/s), both belts. Negative = backwards
 ACCEL = 0.5                 # acceleration used to speed up (m/s^2)
@@ -40,16 +41,24 @@ def stop_treadmill(Bertec):
 
 
 def main():
-    # Create an instance of BertecControl
-    Bertec = BertecController()
-    res = Bertec.start_connection()
-    if res is None:
-        print("Could not connect to Bertec. Is the Bertec software open with remote control enabled?")
+    if not TREADMILL_ON and not VICON_REC:
+        print("TREADMILL_ON and VICON_REC are both False, nothing to do.")
         return
 
-    print(f"\nTreadmill: {SPEED} m/s for {TRIAL_TIME_S}s (accel {ACCEL}, decel {DECEL} m/s^2)")
-    print(f"Vicon recording: {'ON, trial name ' + TRIAL_NAME if VICON_REC else 'OFF (Bertec only)'}")
-    print("\nPress OK in Bertec Software if prompted!")
+    # With the treadmill off we never connect to Bertec, so no speed command can be sent
+    Bertec = None
+    if TREADMILL_ON:
+        Bertec = BertecController()
+        res = Bertec.start_connection()
+        if res is None:
+            print("Could not connect to Bertec. Is the Bertec software open with remote control enabled?")
+            return
+        print(f"\nTreadmill: {SPEED} m/s for {TRIAL_TIME_S}s (accel {ACCEL}, decel {DECEL} m/s^2)")
+    else:
+        print(f"\nTreadmill: OFF (belts stay still), trial length {TRIAL_TIME_S}s")
+    print(f"Vicon recording: {'ON, trial name ' + TRIAL_NAME if VICON_REC else 'OFF'}")
+    if TREADMILL_ON:
+        print("\nPress OK in Bertec Software if prompted!")
 
     Nexus_notifier = None
     recording = False
@@ -66,22 +75,25 @@ def main():
         for remaining in range(START_DELAY_S, 0, -1):
             print(f"  {remaining}...", flush=True)
             time.sleep(1)
-        print("Starting treadmill now.\n", flush=True)
+        print("Starting trial now.\n", flush=True)
 
         if VICON_REC:
             Nexus_notifier.notify()  # start Vicon recording
             recording = True
-        set_treadmill(Bertec, SPEED, SPEED, ACCEL, DECEL)
+        if TREADMILL_ON:
+            set_treadmill(Bertec, SPEED, SPEED, ACCEL, DECEL)
         time.sleep(TRIAL_TIME_S)
         print(f"Trial finished after {TRIAL_TIME_S}s.", flush=True)
     except KeyboardInterrupt:
         print("\nInterrupted by user.")
     finally:
         # Always stop the belts and the Vicon capture, even on Ctrl+C or an error
-        stop_treadmill(Bertec)
+        if Bertec is not None:
+            stop_treadmill(Bertec)
         if recording:
             Nexus_notifier.stop_capture()
-        Bertec.stop_connection()
+        if Bertec is not None:
+            Bertec.stop_connection()
         print("Done.")
 
 
